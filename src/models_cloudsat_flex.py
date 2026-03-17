@@ -88,7 +88,7 @@ class GeoCloudSatFlexTransformer(GeoMaskedAutoEncoder):
             return attn_mask[b, q_idx, kv_idx]
 
         self.decoder_attn.keywords["block_mask"] = create_block_mask(
-            block_mask, B=B, H=None, Q_LEN=L, KV_LEN=L, device=coords.device, BLOCK_SIZE=16
+            block_mask, B=B, H=None, Q_LEN=L+1, KV_LEN=L+1, device=coords.device, BLOCK_SIZE=16
         )
 
     def forward_decoder(self, latent, input_coords, output_coords):
