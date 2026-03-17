@@ -58,7 +58,7 @@ class GeoCloudSatFlexTransformer(GeoMaskedAutoEncoder):
     def update_attention_mask(self, coords, num_input_coords, num_output_coords, n_attn=32):
         B, N, L = coords.shape
         coords_dist = ((coords.unsqueeze(-1)-coords.unsqueeze(-2))**2).sum(1)
-        attn_mask = torch.zeros(B, L+1, L+1, dtype=torch.bool, device=coords.device)
+        attn_mask = torch.zeros(B, L, L, dtype=torch.bool, device=coords.device)
 
         # Set class tokens to True for all
         attn_mask[...,0,:] = True
@@ -69,7 +69,7 @@ class GeoCloudSatFlexTransformer(GeoMaskedAutoEncoder):
         max_dist = torch.take_along_dim(
             coords_dist[...,:num_input_coords], idx_input_mask[...,n_attn-1:n_attn], dim=-1
         )
-        attn_mask[...,1:,1:1+num_input_coords] = coords_dist[...,:num_input_coords] <= max_dist
+        attn_mask[...,:num_input_coords] = coords_dist[...,:num_input_coords] <= max_dist
 
         # Calc nearest n_attn output coord locations
         _, idx_output_mask = torch.sort(
@@ -80,7 +80,7 @@ class GeoCloudSatFlexTransformer(GeoMaskedAutoEncoder):
             idx_output_mask[...,n_attn-1:n_attn], 
             dim=-1, 
         )
-        attn_mask[...,1:,1+num_input_coords:1+num_input_coords+num_output_coords] = (
+        attn_mask[...,num_input_coords:num_input_coords+num_output_coords] = (
             coords_dist[...,num_input_coords:num_input_coords+num_output_coords] <= max_dist
         )
 
@@ -108,7 +108,7 @@ class GeoCloudSatFlexTransformer(GeoMaskedAutoEncoder):
         rel_output_coords = output_coords - mean_coords.unsqueeze(-1)
         num_output_coords = rel_output_coords.shape[-1]
         coords = torch.cat([coords, rel_output_coords], dim=-1)
-        self.update_coords(coords, self.decoder_rope)
+        self.update_coords(coords, self.decoder_rope, class_token=False)
 
         # update attention mask
         self.update_attention_mask(coords, num_input_coords, num_output_coords)
@@ -126,7 +126,7 @@ class GeoCloudSatFlexTransformer(GeoMaskedAutoEncoder):
 
     def forward(self, imgs, input_coords, output_coords):
         latent, _, ids_restore = self.forward_encoder(imgs, input_coords, 0.)
-        latent = self.unshuffle_tokens(latent, ids_restore)
+        latent = self.unshuffle_tokens(latent, ids_restore)[:,1:] # remove class token
         pred = self.forward_decoder(latent, input_coords, output_coords)  # [N, L, p*p*C]
         return pred
     
