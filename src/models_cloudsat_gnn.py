@@ -10,7 +10,63 @@ import torch.nn as nn
 import torch_geometric.nn as gnn
 from torch_geometric.utils import dense_to_sparse
 
+from timm.models.layers import DropPath
+from timm.models.vision_transformer import Mlp
+
 from .models_mae5 import GeoMaskedAutoEncoder
+
+class GATBlock(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        mlp_ratio=4.0,
+        drop=0.0,
+        drop_path=0.0,
+        act_layer=torch.nn.GELU,
+        norm_layer=nn.LayerNorm,
+        Mlp_block=Mlp,
+        init_values=1e-4,
+        layer_scale=True,
+    ):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = gnn.GATv2Conv(
+            dim,
+            dim // num_heads, 
+            heads=num_heads, 
+            add_self_loops=False, 
+        )
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp_block(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+        )
+
+        self.layer_scale = layer_scale
+        if layer_scale:
+            self.gamma_1 = nn.Parameter(
+                init_values * torch.ones((dim)), requires_grad=True
+            )
+            self.gamma_2 = nn.Parameter(
+                init_values * torch.ones((dim)), requires_grad=True
+            )
+
+    def forward(self, x, edge_index):
+        B, L, E = x.shape
+
+        if self.layer_scale:
+            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x).reshape(-1, E), edge_index).reshape(B, L, E))
+            x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
+        else:
+            x = x + self.drop_path(self.attn(self.norm1(x).reshape(-1, E), edge_index).reshape(B, L, E))
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
 
 class GeoCloudSatMaskedGNN(GeoMaskedAutoEncoder):
     def __init__(self, *args, output_dim=125, prediction_head=None, **kwargs):
@@ -21,14 +77,21 @@ class GeoCloudSatMaskedGNN(GeoMaskedAutoEncoder):
             torch.nn.functional.scaled_dot_product_attention,
             attn_mask=None, 
         )
+        dpr = [self.drop_path_rate for i in range(self.decoder_depth)]
         self.decoder_blocks = nn.ModuleList(
-            [
-                gnn.GATv2Conv(
-                    self.decoder_embed_dim,
-                    self.decoder_embed_dim // self.decoder_num_heads, 
-                    heads=self.decoder_num_heads, 
-                    add_self_loops=False, 
-                ) for i in range(self.decoder_depth)
+            [   
+                GATBlock(
+                    self.decoder_embed_dim, 
+                    self.decoder_num_heads, 
+                    mlp_ratio=self.mlp_ratio,
+                    drop=0.0,
+                    drop_path=dpr[i],
+                    norm_layer=self.norm_layer,
+                    act_layer=self.act_layer,
+                    Mlp_block=self.Mlp_block,
+                    layer_scale=self.layer_scale,
+                )
+                for i in range(self.decoder_depth)
             ]
         )
         self.output_dim = output_dim
@@ -97,16 +160,10 @@ class GeoCloudSatMaskedGNN(GeoMaskedAutoEncoder):
         # update attention mask
         edge_index = self.get_edge_index(coords, num_input_coords, num_output_coords)
 
-        # Reshape to batched format
-        x = x.reshape(-1, E)
-
         # apply Transformer blocks
         for blk in self.decoder_blocks:
             x = blk(x, edge_index)
         x = self.decoder_norm(x)
-
-        # Reshape to batched format
-        x = x.reshape(B, -1, E)
 
         # predictor projection
         x = self.output_head(x[:, L:])
