@@ -66,12 +66,15 @@ class GeoCloudSatMaskedTransformer(GeoMaskedAutoEncoder):
         attn_mask[...,0,:] = True
         attn_mask[...,:,0] = True
 
+        # Set geo tokens to True for all
+        attn_mask[...,1:num_input_coords+1] = True
+
         # Calc nearest n_attn input coord locations
-        _, idx_input_mask = torch.sort(coords_dist[...,:num_input_coords], dim=-1)
-        max_dist = torch.take_along_dim(
-            coords_dist[...,:num_input_coords], idx_input_mask[...,n_attn-1:n_attn], dim=-1
-        )
-        attn_mask[...,1:,1:1+num_input_coords] = coords_dist[...,:num_input_coords] <= max_dist
+        # _, idx_input_mask = torch.sort(coords_dist[...,:num_input_coords], dim=-1)
+        # max_dist = torch.take_along_dim(
+        #     coords_dist[...,:num_input_coords], idx_input_mask[...,n_attn-1:n_attn], dim=-1
+        # )
+        # attn_mask[...,1:,1:1+num_input_coords] = coords_dist[...,:num_input_coords] <= max_dist
 
         # Calc nearest n_attn output coord locations
         _, idx_output_mask = torch.sort(

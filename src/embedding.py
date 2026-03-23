@@ -30,6 +30,32 @@ class ResBlock(nn.Module):
     def forward(self, x):
         return self.dropout(self.identity(x) + self.block(x))
 
+class DownsampleBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, dropout_p=0.0):
+        super().__init__()
+        self.norm1 = nn.BatchNorm2d(in_ch)
+        self.relu1 = nn.ReLU()
+        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, stride=2, padding=1)
+        self.norm2 = nn.BatchNorm2d(out_ch)
+        self.relu2 = nn.ReLU()
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+        
+        self.dropout = nn.Dropout2d(p=dropout_p)
+
+        # Note that the order of the layers is changed
+        self.block = nn.Sequential(
+            self.norm1, self.relu1, self.conv1, self.norm2, self.relu2, self.conv2, 
+        )
+
+        self.identity = nn.Sequential(
+            nn.MaxPool2d(2), 
+            nn.Conv2d(in_ch, out_ch, 1)
+        )
+            
+    
+    def forward(self, x):
+        return self.dropout(self.identity(x) + self.block(x))
+
 class InputBlock(nn.Module):
     def __init__(self, in_ch, out_ch, dropout_p=0.0):
         super().__init__()
